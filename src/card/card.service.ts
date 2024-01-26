@@ -6,24 +6,20 @@ import {
 import { CreateCardDto } from './dto/create-card.dto';
 import { Deck, DeckDocument } from '../deck/deck.schema';
 import { Language } from '../deck/languages.enum';
-import { TranslatorService } from './translator.service';
 import { LexicalInfoService } from './lexical-info.service';
-import ApiResponse from './response/api-response';
-import LibreTranslateResponse from './response/libre-translate-response';
 import ApiDictionaryResponse, {
-  Definition,
-  Meaning,
   Phonetic,
 } from './response/api-dictionary-response';
 import { InjectModel } from '@nestjs/mongoose';
 import { Card, CardDocument } from './card.schema';
 import { Model } from 'mongoose';
+import { OpenAIService } from './openai.service';
 
 @Injectable()
 export class CardService {
   constructor(
-    private readonly translatorService: TranslatorService,
     private readonly lexicalInfoService: LexicalInfoService,
+    private readonly openAIService: OpenAIService,
     @InjectModel(Card.name) private readonly cardModel: Model<CardDocument>,
   ) {}
 
@@ -39,23 +35,25 @@ export class CardService {
       );
     }
 
-    // Get data from external APIs
-    const { libreTranslateResponse, apiDictionaryResponse } =
-      await this.getExternalData(
-        createCardDto.word.toLowerCase(),
-        deck.fromLang,
-        deck.toLang,
-      );
-    let externalData;
-    if (!apiDictionaryResponse.error) {
-      externalData = this.extractInformation(apiDictionaryResponse.data[0]);
+    const cardInfo = await this.openAIService.getInformation(
+      createCardDto.word,
+      deck.fromLang,
+      deck.toLang,
+    );
+
+    const word =
+      deck.fromLang === Language.en ? createCardDto.word : cardInfo.translation;
+    const lexicalInfoResponse = await this.lexicalInfoService.getInfo(word);
+    let phoneticData;
+    if (!lexicalInfoResponse.error) {
+      phoneticData = this.extractInformation(lexicalInfoResponse.data[0]);
     }
 
     // Insert Card into Database
     const card = await this.cardModel.create({
       word: createCardDto.word,
-      translation: libreTranslateResponse.data.translatedText,
-      ...externalData,
+      ...phoneticData,
+      ...cardInfo,
       deck: deck,
       createdAt: Date.now(),
     });
@@ -84,45 +82,10 @@ export class CardService {
     );
   }
 
-  async getExternalData(word: string, fromLang: Language, toLang: Language) {
-    let libreTranslateResponse: ApiResponse<LibreTranslateResponse>;
-    let apiDictionaryResponse: ApiResponse<ApiDictionaryResponse[]>;
-    if (fromLang === Language.en) {
-      // Call both APIs at the same time
-      [libreTranslateResponse, apiDictionaryResponse] = await Promise.all([
-        this.translatorService.translate(word, fromLang, toLang),
-        this.lexicalInfoService.getInfo(word),
-      ]);
-      if (libreTranslateResponse.error) {
-        throw new ConflictException(`No Translation found for ${word}`);
-      }
-    } else {
-      // Call APIs one after another
-      libreTranslateResponse = await this.translatorService.translate(
-        word,
-        fromLang,
-        toLang,
-      );
-      if (libreTranslateResponse.error) {
-        throw new ConflictException(`No Translation found for ${word}`);
-      }
-      // Since I know the translated word has to be English, I can call this api now
-      apiDictionaryResponse = await this.lexicalInfoService.getInfo(
-        libreTranslateResponse.data.translatedText,
-      );
-    }
-
-    return { libreTranslateResponse, apiDictionaryResponse };
-  }
-
   extractInformation(apiDictionaryResponse: ApiDictionaryResponse) {
     const phonetic = this.extractPhonetic(apiDictionaryResponse);
-    const meanings = this.extractMeaning(apiDictionaryResponse.meanings);
 
-    return {
-      ...phonetic,
-      ...meanings,
-    };
+    return phonetic;
   }
 
   extractPhonetic(apiDictionaryResponse: ApiDictionaryResponse) {
@@ -141,31 +104,6 @@ export class CardService {
     return {
       phonetic,
       audioLink,
-    };
-  }
-
-  extractMeaning(meanings: Meaning[]) {
-    let synonyms: string[] = [];
-    let antonyms: string[] = [];
-    const definitions: string[] = [];
-    const examples: string[] = [];
-    meanings.forEach((meaning: Meaning) => {
-      synonyms = synonyms.concat(meaning.synonyms);
-      antonyms = antonyms.concat(meaning.antonyms);
-
-      meaning.definitions.forEach((definition: Definition) => {
-        definitions.push(definition.definition);
-        if (definition.example) {
-          examples.push(definition.example);
-        }
-      });
-    });
-
-    return {
-      synonyms,
-      antonyms,
-      definitions,
-      examples,
     };
   }
 

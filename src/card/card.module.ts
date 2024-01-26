@@ -1,12 +1,12 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { CardService } from './card.service';
-import { TranslatorService } from './translator.service';
 import { LexicalInfoService } from './lexical-info.service';
 import { HttpModule } from '@nestjs/axios';
 import { MongooseModule } from '@nestjs/mongoose';
 import { Card, CardSchema } from './card.schema';
 import { DeckModule } from '../deck/deck.module';
 import { CardController } from './card.controller';
+import { OpenAIService } from './openai.service';
 
 @Module({
   imports: [
@@ -18,7 +18,7 @@ import { CardController } from './card.controller';
     forwardRef(() => DeckModule),
   ],
   controllers: [CardController],
-  providers: [CardService, TranslatorService, LexicalInfoService],
+  providers: [CardService, LexicalInfoService, OpenAIService],
   exports: [CardService],
 })
 export class CardModule {}

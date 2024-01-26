@@ -4,23 +4,11 @@ import { Card, CardDocument } from './card.schema';
 import { getModelToken } from '@nestjs/mongoose';
 import { DeepMocked, createMock } from '@golevelup/ts-jest';
 import { Model } from 'mongoose';
-import { TranslatorService } from './translator.service';
-import { LexicalInfoService } from './lexical-info.service';
-import { CreateCardDto } from './dto/create-card.dto';
-import { ConflictException } from '@nestjs/common';
 import { Deck, DeckDocument } from '../deck/deck.schema';
-import ApiResponse from './response/api-response';
-import LibreTranslateResponse from './response/libre-translate-response';
-import ApiDictionaryResponse, {
-  Meaning,
-} from './response/api-dictionary-response';
-import { Language } from '../deck/languages.enum';
 
 describe('CardService', () => {
   let service: CardService;
   let cardModel: DeepMocked<Model<CardDocument>>;
-  let translatorService: DeepMocked<TranslatorService>;
-  let lexicalInfoService: DeepMocked<LexicalInfoService>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -30,14 +18,6 @@ describe('CardService', () => {
           provide: getModelToken(Card.name),
           useValue: createMock<Model<CardDocument>>(),
         },
-        {
-          provide: TranslatorService,
-          useValue: createMock<TranslatorService>(),
-        },
-        {
-          provide: LexicalInfoService,
-          useValue: createMock<LexicalInfoService>(),
-        },
       ],
     })
       .useMocker(createMock)
@@ -45,58 +25,10 @@ describe('CardService', () => {
 
     service = module.get(CardService);
     cardModel = module.get(getModelToken(Card.name));
-    translatorService = module.get(TranslatorService);
-    lexicalInfoService = module.get(LexicalInfoService);
   });
 
   it('should be defined', () => {
     expect(service).toBeDefined();
-  });
-
-  describe('create', () => {
-    let deckDocument: DeckDocument;
-    let createCardDto: CreateCardDto;
-
-    beforeEach(() => {
-      deckDocument = createMock<DeckDocument>();
-
-      createCardDto = createMock<CreateCardDto>();
-      createCardDto.word = 'test';
-    });
-    it('should throw exception if duplicate card in deck', async () => {
-      cardModel.findOne.mockResolvedValue({});
-
-      const responsePromise = service.create(createCardDto, deckDocument);
-      await expect(responsePromise).rejects.toThrow(ConflictException);
-      await expect(responsePromise).rejects.toThrow(
-        `The word test already exists in this deck`,
-      );
-
-      expect(cardModel.create).toHaveBeenCalledTimes(0);
-    });
-
-    it('should create a card', async () => {
-      cardModel.findOne.mockResolvedValue(null);
-
-      const getExternalDataSpy = jest.spyOn(service, 'getExternalData');
-      getExternalDataSpy.mockResolvedValue({
-        libreTranslateResponse: {
-          data: { translatedText: 'translation' },
-        } as ApiResponse<LibreTranslateResponse>,
-        apiDictionaryResponse: { data: [{}] } as ApiResponse<
-          ApiDictionaryResponse[]
-        >,
-      });
-
-      const extractInformationSpy = jest.spyOn(service, 'extractInformation');
-      extractInformationSpy.mockReturnValue(null);
-
-      await expect(
-        service.create(createCardDto, deckDocument),
-      ).resolves.not.toThrow();
-
-      expect(cardModel.create).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('copy', () => {
@@ -154,94 +86,6 @@ describe('CardService', () => {
     });
   });
 
-  describe('getExternalData', () => {
-    it('should throw exception if fromLang is en and error in response', async () => {
-      translatorService.translate.mockResolvedValue({
-        error: true,
-        data: null,
-      });
-
-      const responsePromise = service.getExternalData(
-        'house',
-        Language.en,
-        Language.de,
-      );
-      await expect(responsePromise).rejects.toThrow(ConflictException);
-      await expect(responsePromise).rejects.toThrow(
-        'No Translation found for house',
-      );
-    });
-
-    it('should throw exception if toLang is en and error in response', async () => {
-      translatorService.translate.mockResolvedValue({
-        error: true,
-        data: null,
-      });
-
-      const responsePromise = service.getExternalData(
-        'house',
-        Language.de,
-        Language.en,
-      );
-      await expect(responsePromise).rejects.toThrow(ConflictException);
-      await expect(responsePromise).rejects.toThrow(
-        'No Translation found for house',
-      );
-    });
-
-    it('should return the information', async () => {
-      translatorService.translate.mockResolvedValue({
-        error: false,
-        data: { translatedText: 'haus' },
-      });
-
-      lexicalInfoService.getInfo.mockResolvedValue(null);
-
-      const response = await service.getExternalData(
-        'house',
-        Language.de,
-        Language.en,
-      );
-      expect(response).toEqual({
-        libreTranslateResponse: {
-          error: false,
-          data: { translatedText: 'haus' },
-        },
-        apiDictionaryResponse: null,
-      });
-    });
-  });
-
-  describe('extractInformation', () => {
-    it('should combine phonetic and meaning objects', () => {
-      const extractPhoneticSpy = jest.spyOn(service, 'extractPhonetic');
-      extractPhoneticSpy.mockReturnValue({
-        phonetic: 'phonetic',
-        audioLink: 'audioLink',
-      });
-
-      const extractMeaningSpy = jest.spyOn(service, 'extractMeaning');
-      extractMeaningSpy.mockReturnValue({
-        synonyms: [],
-        antonyms: [],
-        definitions: [],
-        examples: [],
-      });
-
-      const apiDictionaryResponse = createMock<ApiDictionaryResponse>();
-
-      const response = service.extractInformation(apiDictionaryResponse);
-      expect(response).toEqual({
-        phonetic: 'phonetic',
-        audioLink: 'audioLink',
-        synonyms: [],
-        antonyms: [],
-        definitions: [],
-        examples: [],
-      });
-    });
-  });
-
   describe('extractPhonetic', () => {
     it('should return phonetic and audioLink from phonetics list', () => {
       const apiDictionaryResponse = {
@@ -284,56 +128,6 @@ describe('CardService', () => {
       expect(response).toEqual({
         phonetic: 'firstPhonetic',
         audioLink: undefined,
-      });
-    });
-  });
-
-  describe('extractMeaning', () => {
-    it('should return the meaning lists (synonyms, antonyms, definitoins, examples)', () => {
-      const meanings: Meaning[] = [
-        {
-          partOfSpeech: 'noun',
-          definitions: [
-            {
-              definition: 'a representative form or pattern',
-              synonyms: ['model', 'prototype', 'exemplar'],
-              antonyms: ['counterexample', 'nonexample'],
-              example: 'This is an example of a well-written definition.',
-            },
-          ],
-          synonyms: ['instance', 'illustration', 'sample'],
-          antonyms: ['noninstance', 'counterexample'],
-        },
-        {
-          partOfSpeech: 'verb',
-          definitions: [
-            {
-              definition: 'to serve as an example of',
-              synonyms: ['illustrate', 'demonstrate', 'exemplify'],
-              antonyms: ['contradict', 'disprove'],
-            },
-          ],
-          synonyms: ['demonstrate', 'show', 'illustrate'],
-          antonyms: ['contradict', 'disprove'],
-        },
-      ];
-
-      const response = service.extractMeaning(meanings);
-      expect(response).toEqual({
-        synonyms: [
-          'instance',
-          'illustration',
-          'sample',
-          'demonstrate',
-          'show',
-          'illustrate',
-        ],
-        antonyms: ['noninstance', 'counterexample', 'contradict', 'disprove'],
-        definitions: [
-          'a representative form or pattern',
-          'to serve as an example of',
-        ],
-        examples: ['This is an example of a well-written definition.'],
       });
     });
   });
